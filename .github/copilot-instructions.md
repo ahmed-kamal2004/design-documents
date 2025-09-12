@@ -20,6 +20,11 @@ When helping users create a new design document:
 4. **Maintain consistency** - Ensure design documents follow established patterns and terminology
 5. **Facilitate decision-making** - Help users think through alternatives and trade-offs
 
+## Drasi Docs
+- [Drasi Project Overview](https://drasi.io)
+- [Drasi GitHub Organization](https://github.com/drasi-project)
+
+
 ## Design Document Structure
 
 When helping users create design documents, always reference and guide them through the official template structure:
@@ -46,17 +51,29 @@ When helping users create design documents, always reference and guide them thro
 ### 1. Clarity and Accessibility
 - Ensure the overview is understandable by someone outside the Drasi team
 - Ask users to explain technical concepts in simple terms
-- Encourage the use of diagrams for complex architectures
+- Encourage the use of coding blocks for examples
+- Encourage the use of diagrams where appropriate
 - Verify that user scenarios are well-defined with clear roles and personas
 
 ### 2. Technical Rigor
-- **Dependencies**: Help identify all feature dependencies (Bicep types, UCP, CoreRP, LinkRP, CLI, etc.)
-- **Architecture**: Ensure designs consider multi-component interactions (RP communications, CLI-RP communication, UCP protocol changes, external system integration)
-- **API Design**: For any public API changes, require detailed REST API specifications, CLI command descriptions, and Go API modifications
-- **Security**: Prompt for security considerations including authentication, credential storage, and threat mitigation
+- **Dependencies**: Help identify all feature dependencies across Drasi components (drasi-core, drasi-platform, sources, reactions, control plane, CLI). Consider SDK compatibility requirements (Rust, Java, .NET, Python)
+- **Architecture**: Ensure designs consider multi-component interactions including:
+  - Query processing flow between Sources → Query Container → Reactions
+  - Data change propagation through the continuous query engine
+  - Storage layer interactions (in-memory vs persistent indexes)
+  - Control plane coordination with Kubernetes Resource Provider
+  - Cross-language compatibility between Cypher and GQL query engines
+  - SDK integration patterns for custom Sources and Reactions
+- **API Design**: For any public API changes, require detailed specifications:
+  - REST API endpoints with full request/response schemas and status codes
+  - CLI command syntax, options, flags, and usage examples
+  - Go interface definitions with method signatures and error handling
+  - Management API versioning strategy and backward compatibility plan
+  - Kubernetes Custom Resource Definitions (CRDs) and controller interactions
+  - SDK interface changes affecting multiple language bindings
 
 ### 3. Design Quality
-- **Alternatives**: Always ask users to consider at least 2-3 alternative approaches
+- **Alternatives**: Always ask users to consider at least one alternative design approach
 - **Trade-offs**: Help articulate advantages and disadvantages of the proposed design
 - **Testability**: Ensure designs include verification and testing strategies
 - **Scalability**: Consider how the design will handle growth and evolution
@@ -73,7 +90,7 @@ Provide tailored guidance and resources based on the folder where the design doc
 
 ### drasi-core/
 - **Repository**: [drasi-project/drasi-core](https://github.com/drasi-project/drasi-core)
-- **Focus**: Continuous queries functions, Query index (rocks, redis, memory)
+- **Focus**: Continuous queries functions, Query index (rocks, redis, memory), Cypher and GQL parsing and execution engine
 - **Key Considerations**: 
   - Drasi supports both Cypher and GQL query languages
   - New custom Drasi function should be compatible with both Cypher and GQL
@@ -97,12 +114,17 @@ Provide tailored guidance and resources based on the folder where the design doc
 
 ### e2e-test-framework/
 - **Repository**: [drasi-project/test-infra](https://github.com/drasi-project/test-infra)
-- **Focus**: End-to-end testing infrastructure, test automation, and validation frameworks
+- **Focus**: Drasi performance testing
 - **Key Considerations**:
-  - 
+  - Currently only supports the building comfort test scenario. 
+
+### Drasi Sandbox
+- **Repository**: [drasi-project/drasi-sandbox](https://github.com/drasi-project/drasi-sandbox)
+- **Focus**: Drasi Demo environment, Drasi tutorial YAML files, Github Actions workflow for deploying the demo environment and the tutorial apps
+
 
 When a user creates a design document in a specific folder, automatically:
-1. Reference the appropriate repository and provide the GitHub link
+1. Reference the appropriate repository and provide the GitHub link. In the GitHub repo, each folder has a AGENTS.md file that provides additional context and you should reference that as well.
 2. Highlight the folder-specific focus areas and considerations
 3. Suggest relevant dependencies and integration points
 4. Emphasize security aspects specific to that component area
@@ -113,7 +135,7 @@ When a user creates a design document in a specific folder, automatically:
 ### When Starting a New Design Document
 1. **Identify the folder context** - Determine which Drasi component area this design affects and provide folder-specific guidance
 2. Ask about the feature or component being designed
-3. Help identify which Drasi areas will be affected (drasi-core, drasi-platform, e2e-test-framework)
+3. Help identify which Drasi areas will be affected (drasi-core, drasi-platform, etc.)
 4. Clarify the user's role and expertise level
 5. Suggest starting with the overview and objectives sections
 

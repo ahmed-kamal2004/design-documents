@@ -4,7 +4,7 @@
 
 ## Overview
 
-<!-- Provide a succinct high-level description of the component or feature and where/how it fits in the big picture. The overview should be one to three paragraphs long and should be understandable by someone outside Radius team. -->
+<!-- Provide a succinct high-level description of the component or feature and where/how it fits in the big picture. The overview should be one to three paragraphs long and should be understandable by someone outside Drasi team. -->
 
 ## Terms and definitions
 
@@ -61,7 +61,7 @@ Provide a link to the issue(s) tracking this work. -->
 
 ### Architecture Diagram
 
-<!-- Provide an architecture design if applicable. An architecture diagram should be provided when the design involves multiple parts of Radius (Communication between RPs, Communication between CLI and RPs, Protocol changes for UCP, Communication with external systems like clouds, etc.) -->
+<!-- Provide an architecture design if applicable. An architecture diagram should be provided when the design involves multiple parts of Drasi (Communication between RPs, Communication between CLI and RPs, Protocol changes for UCP, Communication with external systems like clouds, etc.) -->
 
 ### Detail design
 
