@@ -36,7 +36,7 @@ When helping users create design documents, always reference and guide them thro
 - **Objectives** - User scenarios, goals, and non-goals
 - **Design Requirements** - Technical requirements, dependencies, constraints
 - **Design** - High-level design, architecture diagrams, detailed design
-- **API Design** - REST APIs, CLI commands, Go APIs (if applicable)
+- **API Design** - REST APIs, CLI commands (if applicable), Resource Provider contract changes
 - **Alternatives Considered** - Other approaches and justifications
 
 ### Optional but Important Sections
@@ -68,7 +68,6 @@ When helping users create design documents, always reference and guide them thro
   - REST API endpoints with full request/response schemas and status codes
   - CLI command syntax, options, flags, and usage examples
   - Management API versioning strategy and backward compatibility plan
-  - Kubernetes Custom Resource Definitions (CRDs) and controller interactions
   - SDK interface changes affecting multiple language bindings
   - Ensures that SDK changes are backward compatible and do not break existing integrations; verify that new SDK features are well-documented and include tests if possible
 
@@ -102,8 +101,8 @@ Provide tailored guidance and resources based on the folder where the design doc
 - **Repository**: [drasi-project/drasi-platform](https://github.com/drasi-project/drasi-platform)
 - **Focus**: Sources, Query Container, Reactions, Control plane (Management API + Kubernetes Resource Provider), Drasi CLI, Drasi VS Code Extension, E2E test, GitHub Actions workflow (image build and release)
 - **Key Considerations**:
-  - [Sources](https://github.com/drasi-project/drasi-platform/sources/): New Sources should use the Drasi SDKs (Rust, Java and Dotnet); Custom Sources should include a reactivator component and proxy component.
-  - [Reactions](https://github.com/drasi-project/drasi-platform/reactions/): New Reactions should use the Drasi SDKs (Python, Java and Dotnet).
+  - [Sources](https://github.com/drasi-project/drasi-platform/sources/): New Sources should use the Drasi SDKs (Rust, Java and Dotnet); Custom Sources should include a reactivator component and proxy component. Ensure that the `build-test` and the `draft-release` workflows are updated to include the new Source. Propose to the developer to add a new test for this Source in the `e2e-test` directory.
+  - [Reactions](https://github.com/drasi-project/drasi-platform/reactions/): New Reactions should use the Drasi SDKs (Python, Java and Dotnet). For new Reactions, ensure that the `build-test` and the `draft-release` workflows are updated to include the new Reaction. Propose to the developer to add a new test for this Reaction in the `e2e-test` directory. 
   - [Control Plane](https://github.com/drasi-project/drasi-platform/control-planes/): The Control Plane should provide a unified management API and integrate with Kubernetes as a Resource Provider.
      - Management API: Support CRUD operations for Sources, Reactions, Continuous Queries, and Query Containers. Ensure API versioning and backward compatibility.
      - Kubernetes Resource Provider: Handles the logic for managing the Kubernetes resources that will be created for Drasi components.
@@ -193,7 +192,7 @@ Use these to guide users through thorough design thinking:
 
 **For Design**: "What are 2-3 different ways you could implement this? What are the trade-offs?"
 
-**For Security**: "What new attack surfaces does this create? How will credentials be managed?"
+**For Security**: TODO 
 
 **For Testing**: "How will you verify this works correctly in different scenarios?"
 
