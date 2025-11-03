@@ -88,7 +88,7 @@ The primary goals of this Dataverse source rewrite are:
      - Understand the structure of lookup field data (e.g., how references to other entities are represented)
      - Determine how lookup fields relate to entity IDs (connection to Goal #2)
      - Explore how lookup values are returned in API responses (navigation properties, expanded data, etc.)
-   - Design how lookup fields should be represented in Drasi's  model:
+   - Design how lookup fields should be represented in Drasi's model:
      - Should lookups become edges/relationships between nodes?
      - How to handle lookup metadata (display name, type information)
    - Explore supporting multiple Dataverse tables/entities in a single source:
@@ -532,32 +532,11 @@ Don't forget:
 
 <!-- Describe (Q&A format) the important unknowns or things you're not sure about. Use the discussion of to answer these with experts after people digest the overall design.
 
-Examples:
-- Q: Should we support both cloud and on-premises Dataverse?
-  A: TBD - need to assess user demand
-
-- Q: What is the optimal polling interval?
-  A: TBD - need to benchmark and consider Dataverse API limits
-
-- Q: How do we handle very large initial bootstraps?
-  A: TBD - consider checkpointing or resumable bootstrap
-
-- Q: Which SDK should we use?
-  A: TBD - .NET might be most natural for Dataverse, but need to consider team expertise
 -->
 
 ## Appendices
 
 <!-- Optional. Describe additional information supporting this design. For instance, describe the details of alternative design if you have one. -->
-
-## References
-
-### Official Documentation
-- [Drasi Platform Repository](https://github.com/drasi-project/drasi-platform)
-- [Drasi Platform Sources](https://github.com/drasi-project/drasi-platform/tree/main/sources)
-- [Microsoft Dataverse Web API Reference](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/overview)
-- [Dataverse Change Tracking](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/use-change-tracking-synchronize-data-external-systems)
-- [Dataverse API Limits](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/api-limits)
 
 ### Research Notes
 
@@ -658,3 +637,13 @@ Option 3: Dynamic Discovery
 - ✅ Scales automatically: More entities → longer intervals
 - ✅ No throttling risk: Always within safe bounds
 - ✅ Easy to reason about: Clear cause and effect
+
+## References
+
+### Official Documentation
+- [Drasi Platform Repository](https://github.com/drasi-project/drasi-platform)
+- [Drasi Platform Sources](https://github.com/drasi-project/drasi-platform/tree/main/sources)
+- [Microsoft Dataverse Web API Reference](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/overview)
+- [Dataverse Change Tracking](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/use-change-tracking-synchronize-data-external-systems)
+- [Dataverse API Limits](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/api-limits)
+
