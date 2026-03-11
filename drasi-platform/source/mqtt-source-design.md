@@ -256,50 +256,136 @@ sensor-2 -> L2
 Pros: zero config.
 Cons: lower query readability and weaker domain semantics.
 
-#### Middleware behavior
+#### Behavior
 
-Middleware should check index existence for hierarchy nodes/edges before creating them, to avoid duplicate graph elements.
-
-Target middleware trait:
-
-```rust
-#[async_trait]
-pub trait SourceMiddleware: Send + Sync {
-		async fn process(
-				&self,
-				source_change: SourceChange,
-				element_index: &dyn ElementIndex,
-		) -> Result<Vec<SourceChange>, MiddlewareError>;
+Proposed sensor input shape:
+```json
+{
+	"type": "temperature",
+	"value": 4.2,
+	"unit": "C"
 }
 ```
+With topic name:
+```
+building-1/floor-1/room-2/sensor-1
+```
+With configured hierarchical model:
+```
+Building/Floor/Room/Sensor
+```
 
-Relevant index operations:
+Proposed Drasi `SourceChange` records emitted after source transformation:
 
 ```rust
-async fn get_element(
-		&self,
-		element_ref: &ElementReference,
-) -> Result<Option<Arc<Element>>, IndexError>;
+// Topic segments are mapped positionally onto the configured hierarchy model:
+// building-1 -> Building, floor-1 -> Floor, room-2 -> Room, sensor-1 -> Sensor
+query.process_source_change(SourceChange::Update {
+	element: Element::Node {
+		metadata: ElementMetadata {
+			reference: ElementReference::new("mqtt", "building-1"),
+			labels: Arc::new([Arc::from("Building")]),
+			effective_from: 0,
+		},
+		properties: ElementPropertyMap::from(json!({
+			"name": "building-1",
+		}))
+	},
+}).await;
 
-async fn set_element(
-		&self,
-		element: &Element,
-		slot_affinity: &Vec<usize>,
-) -> Result<(), IndexError>;
+query.process_source_change(SourceChange::Update {
+	element: Element::Node {
+		metadata: ElementMetadata {
+			reference: ElementReference::new("mqtt", "floor-1"),
+			labels: Arc::new([Arc::from("Floor")]),
+			effective_from: 0,
+		},
+		properties: ElementPropertyMap::from(json!({
+			"name": "floor-1",
+		}))
+	},
+}).await;
+
+query.process_source_change(SourceChange::Update {
+	element: Element::Node {
+		metadata: ElementMetadata {
+			reference: ElementReference::new("mqtt", "room-2"),
+			labels: Arc::new([Arc::from("Room")]),
+			effective_from: 0,
+		},
+		properties: ElementPropertyMap::from(json!({
+			"name": "room-2",
+		}))
+	},
+}).await;
+
+query.process_source_change(SourceChange::Update {
+	element: Element::Relation {
+		metadata: ElementMetadata {
+			reference: ElementReference::new("mqtt", "building-1-has-floor-1"),
+			labels: Arc::new([Arc::from("HAS_FLOOR")]),
+			effective_from: 0,
+		},
+		properties: ElementPropertyMap::new(),
+		out_node: ElementReference::new("mqtt", "building-1"),
+		in_node: ElementReference::new("mqtt", "floor-1"),
+	},
+}).await;
+
+query.process_source_change(SourceChange::Update {
+	element: Element::Relation {
+		metadata: ElementMetadata {
+			reference: ElementReference::new("mqtt", "floor-1-has-room-2"),
+			labels: Arc::new([Arc::from("HAS_ROOM")]),
+			effective_from: 0,
+		},
+		properties: ElementPropertyMap::new(),
+		out_node: ElementReference::new("mqtt", "floor-1"),
+		in_node: ElementReference::new("mqtt", "room-2"),
+	},
+}).await;
+
+query.process_source_change(SourceChange::Update {
+	element: Element::Relation {
+		metadata: ElementMetadata {
+			reference: ElementReference::new("mqtt", "room-2-has-sensor-1"),
+			labels: Arc::new([Arc::from("HAS_SENSOR")]),
+			effective_from: 0,
+		},
+		properties: ElementPropertyMap::new(),
+		out_node: ElementReference::new("mqtt", "room-2"),
+		in_node: ElementReference::new("mqtt", "sensor-1"),
+	},
+}).await;
 ```
 
-Flow summary:
+Main SourceChange:
 
-```text
-For each hierarchy node/edge derived from topic:
-	- Check if element exists via get_element
-	- If missing, create/store via set_element
-Then emit final SourceChange set (including sensor/value update).
+```rust
+query.process_source_change(SourceChange::Update {
+    element: Element::Node {
+        metadata: ElementMetadata {
+            reference: ElementReference::new("mqtt", "sensor-1"),
+            labels: Arc::new([Arc::from("Sensor")]),
+            effective_from: 0,
+        },
+        properties: ElementPropertyMap::from(json!({
+            "type": "temperature",
+            "value": 4.2,
+            "unit": "C",
+            "topic": "building-1/floor-1/room-2/sensor-1"
+        }))
+    },
+}).await;
 ```
+
+For the hierarchy model, the source should emit one node per topic segment and one relation per parent-child edge so the topic name becomes a traversable graph structure in Drasi.
+
+If this operation is done on each message, this will decrease the performance.
 
 #### Data format
 
-JSON is the primary payload format in v1. Additional formats may be added later behind explicit configuration.
+JSON is the primary payload format in v1. Additional formats may be added later based on explicit configuration.
 
 #### MQTT protocol version
 
