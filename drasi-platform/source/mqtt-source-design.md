@@ -83,6 +83,8 @@ The key design axis is topic mapping strategy. This document captures three appr
 1. **Hierarchy model mapping (preferred for readability):** user declares semantic levels such as `Building/Floor/Room/Sensor`.
 2. **Separator/regex mapping:** user declares parsing pattern (e.g., dash-separated entity/value tokens).
 3. **Level mapping fallback:** no semantic config; levels become generic labels (`L0`, `L1`, `L2`).
+4. **Pattern based matching:** uses Template Variables to extract metadata from the topic and determines how the JSON payload updates the graph.
+
 
 ### Architecture Diagram
 
@@ -113,15 +115,26 @@ or
 }
 ```
 
+or 
+
+```
+44.2
+```
+
 Example topic:
 
 ```text
 building-1/floor-1/room-2/sensor-1
 ```
+or
+
+```
+building-1/floor-1/room-2/sensor-1/temperature
+```
 
 #### Quality of service (QoS)
 
-Quality of service can be set per topic subscription `client.subscribe(topic, qos)`, as a default `QoS` can be set to `1` for all subscriptions, while keeping `QoS::0` and `QoS::2` as options.
+Quality of service can be specified per topic subscription `client.subscribe(topic, qos)`, as a default `QoS` can be set to `1` for all subscriptions, while keeping `QoS::0` and `QoS::2` as options.
 
 With durable WAL being supported and enabled within MQTT source, `QoS::0` must be prevented and fallen back to `QoS::1`.
 
@@ -271,14 +284,17 @@ it will have 4 sections
 
 1. `entity`: contains the `label` and the `id` patterns for the main node that contains data.
 2. `properties`: contains ingestion modes and contains 3 options.
-`payload_as_field` and `field_name`: Use when the topic segment (e.g., {attribute}) defines the property name and the payload is a single value.
 
-`payload_spread`: Use when the payload is a JSON object; the source flattens all keys directly into the Drasi node properties.
+`mode` of `payload_as_field` and specified `field_name`: Use when the topic segment (e.g., {attribute}) defines the property name and the payload is a single value.
+
+`mode` of `payload_spread`: Use when the payload is a JSON object; the source flattens all keys directly into the Drasi node properties.
 
 `inject`: (can be used with any of the `payload_as_field` or `payload_spread` options) Allows the user to manually insert topic variables (like {floor}) into the node's properties alongside the payload data for better query context.
 
 3. `nodes`: to define the hierarchical parent nodes used in relations, where every nodes requires a `label` and `id`.
-4. `relations`: to define the relation between the hierarchical parent nodes defined in `nodes` and the main node defined in `entity`, where each relation needs `label`, `from` and `to`.
+4. `relations`: to define the relation between the hierarchical parent nodes defined in `nodes` and the main node defined in `entity`, where each relation needs `label`, `from` and `to`,
+
+Note, nodes specified in `nodes` section but can't access the main entity node using any path can be ignored (whenever ignoring it increases the efficieny).
 
 Example
 
@@ -298,7 +314,8 @@ topic_mappings:
 		  id: "{building}:{floor}"
 		- label: "Room"
 		  id: "{building}:{floor}:{room}" 
-	relationships:                                                                                             - label: "HAS_FLOOR"                                      
+	relationships:
+        - label: "HAS_FLOOR"                                      
           from: "Building" ## node label
           to: "Floor"          ## node label
         - label: "HAS_ROOM"
@@ -434,7 +451,7 @@ query.process_source_change(SourceChange::Update {
 
 #### Optimization
 
-For the hierarchy model, the source must emit one node per topic segment and one relation per parent-child edge to create a queryable graph structure. However, emitting redundant nodes and relations for every incoming message is inefficient. The MQTT Source can choose to implement filter (Write-absorption layer) from a set of strategies including **Bloom Filters** and **Adaptive Radix Trees (ART)** to minimize redundant emissions while maintaining correctness.
+For the hierarchy model, the source must emit the hierarchical nodes and relations to create a queryable graph structure. However, emitting redundant (already stored in indexes) nodes and relations for every incoming message is inefficient. The MQTT Source can choose to implement filter (Write-absorption layer) from a set of strategies including **Bloom Filters** and **Adaptive Radix Trees (ART)** to minimize redundant emissions while maintaining correctness.
 
 ##### Problem
 
@@ -506,10 +523,10 @@ if get_random_probability() < small_probability:
 
 return
 ```
-when using `Pattern based matching`, check if done for the parents of the main entity node and the relations between them `for each edge`
+when using `Pattern based matching`, checking is done againest the parents of the main entity node and the relations between them `for each edge` instead the traditional segmenting based on the topic naming pattern.
 
 **Advantages:**
-- **Lower effective full-path false positives**: All prefixes must pass before skipping schema emission.
+- **Lower false positives rate**: All prefixes must pass before skipping schema emission.
 	- Example (independence approximation): with `p=5%` and 4 levels, `p^n = 0.05^4 = 0.00000625` (0.000625%).
 - **Minimal memory overhead**: One shared Bloom Filter across all hierarchies, and the bloom filter is very memory efficient by design.
 - **Strong write-absorption behavior**: Repeated hierarchies avoid redundant node/relation emissions.
@@ -544,12 +561,17 @@ when using `Pattern based matching`, no change is expected in the checking mecha
 - **Performs poorly with undefined topic naming patterns**: The strength of radix trees is path compaction for prefixes, if there is no prefix-shared between inputs, it will memory inefficient.
 - **Unneeded space consumption**
 	assuming we got `building-001/floor-02/room-03/sensor-01` and `building-011/floor-02/room-03/sensor-01`, the term `1/floor-02/room-03/sensor-01` will be replicated on each side of the tree.
+<img width="789" height="456" alt="Screenshot from 2026-04-06 17-00-37" src="https://github.com/user-attachments/assets/d398843c-a0c8-484f-9dce-2e20b6b4bcf2" />
+
 
 ##### Solution 3: Segmented ART approach
 
 Maintain one ART, HashSet(u64) for relations and atomic counter (u32).
 we insert in the ART `(key, value)` where `key` is `{label}-{id}` and `value` is the current seq number (u32).
 the hash-set contains (`u64`)(`parent u32``child u32`)
+
+<img width="1207" height="551" alt="Screenshot from 2026-04-06 18-24-29" src="https://github.com/user-attachments/assets/e9e71b73-778c-49f3-ae5c-c8daeeb064a7" />
+
 
 **How it works:**
 
@@ -566,7 +588,7 @@ For topic `building-011/floor-02/room-03/sensor-01`:
 
 this gives detailed picture of what exists in the indexes, enabling fine-controlled of the emitted hierarchy schema payload (so, we don't insert what is already existing). 
 
-when using `Pattern based matching`, no change is expected in the current mechanism.
+when using `Pattern based matching`, we will store for each node (ids) and relation (specified in the `nodes` and `relations` sections) instead of for each segment (basically mapping is done before the segmented-ART step).
 
 **Advantages:**
 - **Deterministic existence checks**: Not probabilistic.
@@ -629,8 +651,9 @@ No new REST API is proposed in this design. The expected change is a new source 
 
 ### Alternatives Considered
 
-- **Hierarchy model mapping** vs **separator/regex mapping** vs **generic level mapping**.
+- **Hierarchy model mapping** vs **separator/regex mapping** vs **generic level mapping** vs **Pattern-based matching**.
 - Hierarchy model is favored for readability of user queries.
+- Pattern-Based matching is favored because the extreme flexibility it gives to the users.
 - Separator/regex and level mapping remain valid fallback modes for low-governance topic ecosystems.
 
 ## Security
@@ -687,7 +710,7 @@ pub enum MqttTransportMode {
 
 1. Should hierarchy model mapping be mandatory in v1, or optional with auto-fallback?
 2. Which additional payload formats should be prioritized after JSON?
-
+3. Is the `durability.max_size_mb` in the Durable WAL design source configurable after source start or needs source restart to be reconfigured ?
 <!-- Describe (Q&A format) the important unknowns or things you're not sure about. Use the discussion of to answer these with experts after people digest the overall design. -->
 
 ## Appendices
