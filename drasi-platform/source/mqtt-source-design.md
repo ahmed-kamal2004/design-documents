@@ -379,9 +379,151 @@ query.process_source_change(SourceChange::Update {
 }).await;
 ```
 
-For the hierarchy model, the source should emit one node per topic segment and one relation per parent-child edge so the topic name becomes a traversable graph structure in Drasi.
+#### Optimization
 
-If this operation is done on each message, this will decrease the performance.
+For the hierarchy model, the source must emit one node per topic segment and one relation per parent-child edge to create a queryable graph structure. However, emitting redundant nodes and relations for every incoming message is inefficient. The MQTT Source can choose to implement filter (Write-absorption layer) from a set of strategies including **Bloom Filters** and **Adaptive Radix Trees (ART)** to minimize redundant emissions while maintaining correctness.
+
+##### Problem
+
+High-load MQTT sources emit many messages from the same sensor hierarchies. If each message triggers full node and relation emission (e.g., `Building-1`, `Floor-1`, `Room-2`, `Sensor-1` nodes plus 3 relations), repeated hierarchies sent as `SourceChange` add significant load on continuous queries and indexes, especially in deployments with thousands of sensors.
+
+##### Solution 1: Hierarchical-based Bloom Filter approach
+
+Maintain a **single shared Bloom Filter** and check hierarchically by progressively building the full topic path. For each incoming message, validate that all intermediate hierarchy levels have been seen before emitting nodes and relations.
+
+**How it works:**
+
+For topic `building-011/floor-02/room-03/sensor-01`:
+
+1. Check Bloom Filter for `building-011` → exists?
+2. Check Bloom Filter for `building-011/floor-02` → exists?
+3. Check Bloom Filter for `building-011/floor-02/room-03` → exists?
+4. Check Bloom Filter for `building-011/floor-02/room-03/sensor-01` → exists?
+
+If all checks pass, the hierarchy is treated as likely known and schema emission is skipped.
+The false-positive chance for a full path becomes much lower because every prefix must pass. if per-check false-positive rate is `p` and topic depth is `n`, the full-path false-positive rate is approximately `p^n`.
+
+One edge case is a persistent false-positive key pattern. To avoid starving those paths forever, we add a very low-probability revalidation path that occasionally processes and inserts even when all checks return positive.
+
+
+
+**Example:**
+
+```
+First message: building-011/floor-02/room-03/sensor-01
+- Check "building-011": NOT found → Emit the full schema + add to filter
+
+Second message: building-011/floor-02/room-03/sensor-01 (repeated)
+- Check "building-011": FOUND
+- Check "building-011/floor-02": FOUND
+- Check "building-011/floor-02/room-03": FOUND
+- Check "building-011/floor-02/room-03/sensor-01": FOUND
+→ Skip all node/relation emissions, emit only sensor value update (emit schema with very low probability)
+
+Third message: building-011/floor-02/room-04/sensor-02 (new room, same floor)
+- Check "building-011": FOUND
+- Check "building-011/floor-02": FOUND
+- Check "building-011/floor-02/room-04": NOT found → Emit full schema + add to filter
+
+```
+
+Implementation sketch:
+
+```python
+s = "building01/floor02/room03/sensor-temperature"
+
+# segment s
+s_segments = s.split("/")
+
+# check for each hierarchy parent if it exists in the bloom filter
+hierarchy = ""
+for i, segment in enumerate(s_segments):
+	hierarchy = segment if i == 0 else hierarchy + "/" + segment
+
+	if hierarchy not in bloom_filter:
+		emit_to_continuos_query(s)
+		return
+
+# exiting the loop without return means hierarchy likely exists in bloom filter
+# with very low probability of false positives (multi-level checks)
+# do a final low-probability insertion to handle persistent false-positive inputs
+small_probability = 0.0001  # 0.01%
+if get_random_probability() < small_probability:
+	emit_to_continuos_query(s)
+
+return
+```
+
+**Advantages:**
+- **Lower effective full-path false positives**: All prefixes must pass before skipping schema emission.
+	- Example (independence approximation): with `p=5%` and 4 levels, `p^n = 0.05^4 = 0.00000625` (0.000625%).
+- **Minimal memory overhead**: One shared Bloom Filter across all hierarchies, and the bloom filter is very memory efficient by design.
+- **Strong write-absorption behavior**: Repeated hierarchies avoid redundant node/relation emissions.
+
+**Disadvantages:**
+- **Multiple checks per message**: O(depth) lookups instead of a single O(1) check, where `depth` is the number of segments in the topic name.
+- **No strong (almost eventually) hierarchical consistency**: Because of false-positives probability, some hierarchies maybe classified as already exists in the database while they aren't, this problem is mitigated using the `low probability insertion mechanism` under the condition that there is a load from this hierarchy (topic name).
+- **Scalability** standard bloom-filter is not scalable with increasing number of inputs, which results in increasing the rate of false positive, solution is to implement scalable size-increasing bloom filter that keeps a strict limit on the false positive rate (multiple papers can be analyzed for implementation).
+
+
+
+##### Solution 2: ART (Adaptive Radix Tree) approach
+
+Maintain an **Adaptive Radix Tree** and check the hierarchy existence by checking the topic name against the tree.
+
+**How it works:**
+
+For topic `building-011/floor-02/room-03/sensor-01`:
+
+1. Check Tree for `building-011/floor-02/room-03/sensor-01` → exists?
+
+If exists, schema emission is skipped, else, the schema is emitted to the query and added to the tree.
+
+**Advantages:**
+- **Minimal memory overhead**: ART is highly memory efficient (but less efficient than bloom-filters).
+- **Consistency**: If a specific hierarchy is identified as existed, then it is 100 % exists in the indexes.
+- **O(K) check**: Where K is the number of bytes of the topic string, with path compaction mechanism of the ART, K is decreased.
+
+**Disadvantages:**
+- **Performs poorly with undefined topic naming patterns**: The strength of radix trees is path compaction for prefixes, if there is no prefix-shared between inputs, it will memory inefficient.
+- **Unneeded space consumption**
+	assuming we got `building-001/floor-02/room-03/sensor-01` and `building-011/floor-02/room-03/sensor-01`, the term `1/floor-02/room-03/sensor-01` will be replicated on each side of the tree.
+
+##### Solution 3: Segmented ART approach
+
+Maintain one ART, HashSet(u64) for relations and atomic counter (u32).
+we insert in the ART `(key, value)` where `key` is `{label}-{id}` and `value` is the current seq number (u32).
+the hash-set contains (`u64`)(`parent u32``child u32`)
+
+**How it works:**
+
+For topic `building-011/floor-02/room-03/sensor-01`:
+
+
+1. key: `BUILDING-building-011` value: 1(u32) (ART)
+2. key: `FLOOR-floor-02` value: 2(u32) (ART)
+3. key: `ROOM-room-03` value: 3(u32) (ART)
+4. key: `SENSOR-sensor-01` value: 4(u32) (ART)
+5. relation (1-2) (HashSet)
+6. relation (2-3) (HashSet)
+7. relation (3-4) (HashSet)
+
+this gives detailed picture of what exists in the indexes, enabling fine-controlled of the emitted hierarchy schema payload (so, we don't insert what is already existing). 
+
+**Advantages:**
+- **Deterministic existence checks**: Not probabilistic.
+- **Can be more efficient with the undefined topic naming patterns**
+- **Fine-Grained control**: Fine-grained control and representation for the schema.
+- **Minimize unneeded replication**: because of namespace isolation.
+
+**Disadvantages:**
+- **Higher metadata overhead**: Each token maintains its counters, and each relation is represented by >= 8 bytes in memory.
+- **Less time efficient**: checking relation existence can be between O(1) on average, but O(n) for worst cases, for checking set of relations, this can be inefficient.
+
+##### Persistence vs in-memory
+- the filter could start `cold`, and be `hot` while working.
+- disk-persistence and synchronization can be done in next versions.
+
 
 #### Data format
 
@@ -435,8 +577,6 @@ No new REST API is proposed in this design. The expected change is a new source 
 ## Supportability
 
 ### Telemetry
-- TODO
-
 <!-- This includes the list of instrumentation such as metric, log, and trace to diagnose this new feature. -->
 
 ### Verification
@@ -449,7 +589,6 @@ No new REST API is proposed in this design. The expected change is a new source 
 
 ## Development Plan
 
-1. TODO
 
 <!-- This section is for planning how you will deliver your features. This includes aligning work items to features, scenarios or requirements, defining what deliverable will be checked in at each point in the product and estimating the cost of each work item. Don't forget to include the Unit Test and functional test in your estimates. -->
 
