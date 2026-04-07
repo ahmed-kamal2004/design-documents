@@ -89,9 +89,28 @@ The reaction maintains a broker connection with reconnect logic. Events are  pro
 
 ### Detail design
 
-#### 1. Event-to-Topic Mapping and Payload template
+#### 1. Query results Configuration.
 
-Introduce new struct `MqttCallSpec` that includes the target topic name `topic`, the message template body `body`, retaining method `retain` and the Quality of Service `qos`.
+Per Query MQTT configuration `MqttQueryConfig` for each operation ( `added` - `updated` - `deleted` )
+
+```rust
+pub struct MqttQueryConfig {
+    /// MQTT call specification for ADD operations (new rows in query results).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added: Option<MqttCallSpec>,
+
+    /// MQTT call specification for UPDATE operations (modified rows in query results).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated: Option<MqttCallSpec>,
+
+    /// MQTT call specification for DELETE operations (removed rows from query results).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted: Option<MqttCallSpec>,
+}
+```
+
+Introduction of new struct `MqttCallSpec` that includes the target topic name `topic`, the message template body `body`, retaining method `retain` and the Quality of Service `qos`.
+
 
 ```rust
 pub struct MqttCallSpec {
@@ -101,7 +120,7 @@ pub struct MqttCallSpec {
     /// Request body as a Handlebars template.
     /// If empty, sends the raw JSON data.
     #[serde(default)]
-    pub body: String,
+    pub template: String,
 
     /// MQTT message retain policy.
     #[serde(default)]
@@ -113,32 +132,50 @@ pub struct MqttCallSpec {
 }
 ```
 
-Example for using `MqttQueryConfig` for 
+Example for using `MqttQueryConfig`
 
 ```rust
 let default_template = MqttQueryConfig {
         added: Some(MqttCallSpec {
             topic: "t/added".to_string(),
-            body: "[{{query_name}}] + {{after.symbol}}: ${{after.price}}".to_string(),
+            template: "[{{query_name}}] + {{after.symbol}}: ${{after.price}}".to_string(),
             retain: RetainPolicy::NoRetain,
             qos: drasi_reaction_mqtt::config::QualityOfService::ExactlyOnce,
         }),
         updated: Some(MqttCallSpec {
             topic: "t/updated".to_string(),
-            body: "[{{query_name}}] ~ {{after.symbol}}: ${{before.price}} -> ${{after.price}}"
+            template: "[{{query_name}}] ~ {{after.symbol}}: ${{before.price}} -> ${{after.price}}"
                 .to_string(),
             retain: RetainPolicy::NoRetain,
             qos: drasi_reaction_mqtt::config::QualityOfService::ExactlyOnce,
         }),
         deleted: Some(MqttCallSpec {
             topic: "t/deleted".to_string(),
-            body: "[{{query_name}}] - {{before.symbol}} removed".to_string(),
+            template: "[{{query_name}}] - {{before.symbol}} removed".to_string(),
             retain: RetainPolicy::NoRetain,
             qos: drasi_reaction_mqtt::config::QualityOfService::ExactlyOnce,
         }),
     };
 ```
 
-#### 3. Connection and Authentication
+Query result change processing rules:
 
-Supported configuration:
+1. Determine operation type from the incoming result change event (`added`, `updated`, `deleted`).
+2. Select the matching `MqttCallSpec` from `MqttQueryConfig`.
+3. If the operation-specific spec is missing, fall-back to the default configuration.
+4. Generate message format based on the configured `body` message template.
+5. Publish to `topic` with the configured `qos` and `retain` settings.
+
+Template context available to body templates:
+
+- `query_name`: Continuous query name.
+- `before`: Row image before change (for `updated` and `deleted` when available).
+- `after`: Row image after change (for `added` and `updated` when available).
+
+This approach keeps topic routing explicit and stable while still allowing per-query customization.
+(what about topics too ?)
+
+#### 2. MQTT v3.1.1
+
+
+#### 3. Security
