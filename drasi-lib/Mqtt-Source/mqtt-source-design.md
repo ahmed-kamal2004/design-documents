@@ -41,7 +41,7 @@ An analyst wants to query sensor hierarchy and values (Building → Floor → Ro
 1. Add an MQTT Source for drasi-core that subscribes to broker topics and emits Drasi `SourceChange` records.
 2. Support topic hierarchy mapping to graph elements so users can write meaningful Cypher/GQL queries.
 3. Support JSON payloads as the primary format with clear extension points for future formats.
-4. Support MQTT v3.1.1 as the primary protocol version, this achieves (maximum compatibility) as it understands MQTT v3.1.1 brokers and interoperable with MQTT v5 brokers.
+4. Support MQTT v5 as the default protocol version, with fallback option for MQTT v3.1.1.
 5. Validate interoperability with target brokers (Mosquitto and HiveMQ).
 
 ### Non-Goals
@@ -208,74 +208,9 @@ RETURN
 	temperatureChangeTime AS fireRiskDetectedSince
 ```
 
-#### Topic mapping options
+#### Topic mapping
 
-##### Option A: User-declared hierarchy model
-
-User config:
-
-```text
-Building/Floor/Sensor
-```
-
-Topic:
-
-```text
-campus/the-first-floor/temperature
-```
-
-Mapped labels:
-
-```text
-campus -> Building
-the-first-floor -> Floor
-temperature -> Sensor
-```
-
-Pros: highly readable queries and explicit semantics.
-Cons: requires mapping model configuration and enforcement.
-
-##### Option B: Separator/regex mapping
-
-User config provides naming pattern (for example `-`).
-
-Topic:
-
-```text
-building-1/floor-3/sensor-2
-```
-
-Mapped labels:
-
-```text
-building-1 -> building
-floor-3 -> floor
-sensor-2 -> sensor
-```
-
-Pros: flexible and compact config.
-Cons: naming convention must be strictly followed.
-
-##### Option C: Level mapping (no semantic config)
-
-Topic:
-
-```text
-building-1/floor-3/sensor-2
-```
-
-Mapped labels:
-
-```text
-building-1 -> L0
-floor-3 -> L1
-sensor-2 -> L2
-```
-
-Pros: zero config.
-Cons: lower query readability and weaker domain semantics.
-
-##### Option D: Pattern Based Matching
+##### Pattern Based Matching
 This provides a flexible Domain Specific Language (DSL) that uses Template Variables to extract metadata from the topic and determines how the JSON payload updates the graph.
 
 
@@ -340,7 +275,7 @@ With topic name:
 ```
 building-1/floor-1/room-2/sensor-1
 ```
-With configured hierarchical model:
+With configured Pattern-Based Matching model:
 ```
 Building/Floor/Room/Sensor
 ```
@@ -627,7 +562,7 @@ JSON is the primary payload format in v1. Additional formats may be added later 
 
 #### MQTT protocol version
 
-v3.1.1 is the preferred implementation target because it understands v3.1.1 brokers, while being interoperable with v5 brokers
+v5 is the preferred implementation target, while having a fallback option to MQTT v3.1.1.
 
 #### Target brokers
 
@@ -648,13 +583,6 @@ If the product has a layered architecture, it's good to align these sections wit
 ### API Design
 
 No new REST API is proposed in this design. The expected change is a new source type configuration surface (broker endpoint/auth, subscriptions, mapping strategy, payload format) through existing Drasi source resource flows and CLI/apply workflows.
-
-### Alternatives Considered
-
-- **Hierarchy model mapping** vs **separator/regex mapping** vs **generic level mapping** vs **Pattern-based matching**.
-- Hierarchy model is favored for readability of user queries.
-- Pattern-Based matching is favored because the extreme flexibility it gives to the users.
-- Separator/regex and level mapping remain valid fallback modes for low-governance topic ecosystems.
 
 ## Security
 
@@ -682,7 +610,7 @@ pub enum MqttTransportMode {
 
 ## Compatibility impact
 
-- Compatible with MQTT v3.1.1 brokers and interoperable with MQTT v5 brokers.
+- Compatible with MQTT v5 brokers and (fallback) MQTT v3.1.1 brokers.
 - No breaking changes expected for existing sources; this is an additive source type.
 - Query compatibility depends on selected mapping strategy (semantic labels vs generic level labels).
 
@@ -705,6 +633,12 @@ pub enum MqttTransportMode {
 
 
 <!-- This section is for planning how you will deliver your features. This includes aligning work items to features, scenarios or requirements, defining what deliverable will be checked in at each point in the product and estimating the cost of each work item. Don't forget to include the Unit Test and functional test in your estimates. -->
+
+#### V1 Goals
+- Implement rumqqttc with TLS and Auth via IdentityProvider
+- Implement the v5 to 3.1.1 fallback logic
+- Implement Pattern-based matching mapping logic.
+- Skip the cache - emit all nodes
 
 ## Open issues
 
