@@ -57,7 +57,7 @@ An IoT engineer deploys a Drasi continuous query and wants every result change t
 ### Out of scope
 
 - Retry mechanism for unknown failures.
-- This first iteration doesn't include `DLQ` (Dead-letter topic used to store failed publish events after retry exhaustion ).
+- This first iteration doesn't include `DLQ` (Dead-letter topic used to store failed publish events after retry exhaustion).
 
 ## Design
 
@@ -178,7 +178,7 @@ This approach keeps topic routing explicit and stable while still allowing per-q
 
 The reaction targets **MQTT v5** and **MQTT v3.1.1** (fallback option) as main protocols. 
 
-The connection is managed by the [`rumqttc`](https://github.com/bytebeamio/rumqtt) async client, which implements both MQTT v3.1.1 and v5. A single long-lived `AsyncClient` is created at startup and reused for all publish calls. `rumqttc` handles reconnection.
+The connection is managed by the [`rumqttc`](https://github.com/bytebeamio/rumqtt) crate, which implements both MQTT v3.1.1 and v5. A single long-lived `AsyncClient` (v5 or default "v3.1.1" ) is created at startup and reused for all publish calls. `rumqttc` handles reconnection.
 
 The broker connection is configured through `MqttReactionConfig`:
 
