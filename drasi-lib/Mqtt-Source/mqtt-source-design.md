@@ -253,12 +253,15 @@ topic_mappings:
         - label: "HAS_FLOOR"                                      
           from: "Building" ## node label
           to: "Floor"          ## node label
+		  id: "{building}_has_floor_{floor}"
         - label: "HAS_ROOM"
 		  from: "Floor"
           to: "Room"        
+		  id: "{floor}_has_room_{room}"
 		- label: "HAS_THREMOSTAT"
 		  from: "Room"
 		  to: "Thermostat"
+		  id: "{room}_has_sensor_thermostat"
 ```
 
 #### Behavior
@@ -280,7 +283,7 @@ With configured Pattern-Based Matching model:
 Building/Floor/Room/Sensor
 ```
 
-Proposed Drasi `SourceChange` records emitted after source transformation:
+Proposed Drasi `SourceChange` records emitted after source transformation (All of them are of type `UPDATE`):
 
 ```rust
 // Topic segments are mapped positionally onto the configured hierarchy model:
