@@ -226,8 +226,19 @@ it will have 4 sections
 
 `inject`: (can be used with any of the `payload_as_field` or `payload_spread` options) Allows the user to manually insert topic variables (like {floor}) into the node's properties alongside the payload data for better query context.
 
+`inject_id`: (can be used with any of the `payload_as_field` or `payload_spread` options) Allows the user to inject the entity `id` to its properties, this enables filtering on the `id` within the queries (Note: the ids of the `nodes` and `relations` are always injected within the properties of the element).
+
+Sample possible query:
+```
+            MATCH (rd:DEVICE)-[:LOCATED_IN_ROOM]->(r:ROOM)-[:LOCATED_IN_FLOOR]->(f:FLOOR)
+            WHERE rd.id = 'r1:d2' AND r.id = 'r1' AND f.id = 'f2'
+            RETURN rd.reading as val
+```
+
+
 3. `nodes`: to define the hierarchical parent nodes used in relations, where every nodes requires a `label` and `id`.
 4. `relations`: to define the relation between the hierarchical parent nodes defined in `nodes` and the main node defined in `entity`, where each relation needs `label`, `from` and `to`,
+`from` and `to` can be pointing to a node/entity id within the mapping (eg. `{room}:{device}`) or payload reference (eg. `$.gateway_id`) when `payload_spread` is enabled. 
 
 Note, nodes specified in `nodes` section but can't access the main entity node using any path can be ignored (whenever ignoring it increases the efficieny).
 
@@ -251,17 +262,14 @@ topic_mappings:
 		  id: "{building}:{floor}:{room}" 
 	relationships:
         - label: "HAS_FLOOR"                                      
-          from: "Building" ## node label
-          to: "Floor"          ## node label
-		  id: "{building}_has_floor_{floor}"
+          from: "{building}"
+          to: "{building}:{floor}"
         - label: "HAS_ROOM"
-		  from: "Floor"
-          to: "Room"        
-		  id: "{floor}_has_room_{room}"
+		  from: "{building}:{floor}"
+          to: "{building}:{floor}:{room}"        
 		- label: "HAS_THREMOSTAT"
-		  from: "Room"
-		  to: "Thermostat"
-		  id: "{room}_has_sensor_thermostat"
+		  from: "{building}:{floor}:{room}"
+		  to: "{building}:{floor}:{room}:thermostat"
 ```
 
 #### Behavior
