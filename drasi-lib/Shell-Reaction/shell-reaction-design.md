@@ -194,6 +194,8 @@ pub struct ShellExtension {
     pub enable_stdin: Option<bool>, // optional flag to enable/disable stdin mode, default to true
 }
 ```
+`enable_stdin` is an optional flag to enable/disable stdin mode, which is default to `true` if not provided, used when the user only wants to use env variable mapping without using the stdin mode, or doesn't need to use the stdin mode nor the env variable mapping, and just want to use the reaction for executing a command without passing any data to it, in this case they can disable the stdin mode to avoid sending data to the child process.
+
 which will be used in the `TemplateSpec` as an extension.
 
 executables are defined in a new struct named `ShellCommand` which will be used in the `ShellReactionConfig` struct as part of the query-specific configuration.
@@ -264,10 +266,16 @@ let query_tuple = (executable, query_config);
 // then inserted to the shell reaction config routes map with the query id as a key.
 ```
 
-Missing `TemplateSpec` for an operation type (for example, missing `added` template) is allowed, and the reaction will fall back to a default template where data is rendered as JSON string.
+Missing `TemplateSpec` for an operation type (for example, missing `added` template) is allowed, and the reaction will fall back to a default template 
+if no default template is provided, data is rendered as JSON string if `send_raw` is enabled. (Warning)
 
 Last-mile security problem:
 It depends on how the executable processes the input data, which can't be fully controlled by drasi, especially if there is bad input inserted to the drasi query engine, and then has been processed by the executable (this is issue can be mitigated by seccomp integration and proper documentation for best practices).
+#### Send raw data to stdin
+Configuration:
+- `send_raw` configuration field (default to `false`) that allows sending the raw data of the event to the stdin if the rendered template is empty and no default tempalte is provided.
+
+if tempalate is empty, and there is no default tempalte, the reaction will send the raw data of the event to the stdin if `send_raw` is enabled, and the reaction will log a warning. (Warning)
 
 #### Global Env configuration
 
@@ -553,6 +561,7 @@ capture_limit: 1024
 payload_size_limit: 4096
 timeout_s: 10
 kill_on_drop: true
+send_raw: true
 global_envs:
   GLOBAL_VAR1: "{{query_name}}"
   GLOBAL_VAR2: "static_value"
@@ -592,6 +601,7 @@ Metrics will include:
 - queue length
 - active processes
 - results processed (can be grouped by operation type)
+- newlines added
 
 ### Verification
 
