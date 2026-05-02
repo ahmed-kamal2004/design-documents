@@ -105,7 +105,7 @@ At startup, the reaction performs validation of the configured executable path:
 
 Although for each query config, we check the following:
 1. check if the user configured a `route` for a query that the reaction isn't subscribed to. (Error)
-2. check if the reaction is subscribed to a query that doesn't have a `route` configured and a default template doesn't exist(allowed with a warning). (Warning)
+2. check if the reaction is subscribed to a query that doesn't have a `route` configured and a `default_template` doesn't exist. (Error - the reaction MUST fail to start)
 
 If there are configured env variables, they are validated against Linux variable naming rules, which are as follows (Error if any variable name doesn't follow these rules):
 - Must start with a letter or underscore. 
@@ -266,39 +266,47 @@ let query_tuple = (executable, query_config);
 // then inserted to the shell reaction config routes map with the query id as a key.
 ```
 
-Missing `TemplateSpec` for an operation type (for example, missing `added` template) is allowed, and the reaction will fall back to a default template 
-if no default template is provided, data is rendered as JSON string if `send_raw` is enabled. (Warning)
+Missing `TemplateSpec` for an operation type (for example, missing `added` template) is allowed, and the reaction will fall back to a `default_template` if one is provided.
 
-Last-mile security problem:
-It depends on how the executable processes the input data, which can't be fully controlled by drasi, especially if there is bad input inserted to the drasi query engine, and then has been processed by the executable (this is issue can be mitigated by seccomp integration and proper documentation for best practices).
-#### Send raw data to stdin
-Configuration:
-- `send_raw` configuration field (default to `false`) that allows sending the raw data of the event to the stdin if the rendered template is empty and no default tempalte is provided.
+If no `default_template` is provided either, the reaction MUST fall back to sending the raw JSON representation of the event to stdin. No additional flag is needed for this behavior.
 
-if tempalate is empty, and there is no default tempalte, the reaction will send the raw data of the event to the stdin if `send_raw` is enabled, and the reaction will log a warning. (Warning)
+#### Default JSON Fallback
+
+When a route or default_template exists for a delta type but omits the `template` field, the reaction sends the raw `QueryResult` JSON to stdin. This matches the HTTP reaction's behavior with missing body templates and provides a zero-config experience for scripts that just want to parse JSON.
+If the template is provided but renders to an empty string, the reaction still sends the empty string to stdin (this is not the same as a missing template).
 
 #### Global Env configuration
 
-In addition to the env variable mapping per query, we can also support global env variable mapping for all spawned processes by adding a new field in the `ShellReactionConfig` struct named `global_envs` which is a map of env variable name to template string.
+In addition to the env variable mapping per query, we can also support global env variable mapping for all spawned processes by adding a new field in the `ShellReactionConfig` struct named `env` which is a map of env variable name to template string.
 
 ```rust
 pub struct ShellReactionConfig {
-    // other fields...
-    pub global_envs: Option<Vec<HashMap<String, String>>>,
+    pub max_concurrent: u32,
+    pub timeout_s: u64,
+    pub kill_on_drop: bool,
+    pub max_stdin_bytes: usize, // max bytes to render and send to stdin
+    pub capture_limit: usize, // max bytes to capture from stdout and stderr
+    pub max_recent_invocations: u32, // for runtime inspection
+    pub env: Option<HashMap<String, String>>, // global envs
+    pub routes: HashMap<String, (ShellCommand, QueryConfig<ShellExtension>)>,
+    pub default_template: Option<QueryConfig<ShellExtension>>,
 }
 ```
 
 Example config:
 ```yaml
-global_envs:
+env:
   GLOBAL_VAR1: "{{query_name}}"
   GLOBAL_VAR2: "static_value"
 ```
 And it also supports the same validation rules as the query-specific env variable mapping.
 
-#### Data size limits
+#### Stdin data size limits
 
-Proposing a new configuration field `paylaod_size_limit` (default to `4096` bytes) that applies to both stdin and env variable data separately. If the rendered template output exceeds this limit, the reaction will log a warning and reject the event without executing the command. (Warning)
+Configuration:
+- `max_stdin_bytes` specifies the maximum number of bytes to render and send to stdin (default 1 MiB).
+
+The reaction MUST enforce a configurable maximum stdin payload size (`max_stdin_bytes`, default 1 MiB). If the rendered template output exceeds this limit, the reaction MUST reject the event without spawning the child process, log a warning, and increment a drop counter. (Warning)
 
 #### Trailing newlines in data
 
@@ -311,22 +319,24 @@ To prevent excessive memory usage, the reaction captures only the first `capture
 Regarding the stdout, it is logged at the `debug` level, while stderr is logged at the `warn` level.
 
 #### Runtime inspection and debugging
-Using the inspection API, users can see the exit code, stdout and stderr of a set of the most recent executions.
 
-Maintaining a small ring buffer of recent execution results in memory for inspection API is proposed, while those results can be used debugging using the `properties` field in the `ReactionRuntime` struct which is generated by calling the `get_reaction_info` function.
+Configuration:
+- `max_recent_invocations` specifies how many recent execution results to keep in memory for inspection.
 
-This Ring buffer can be implemented as a `VecDeque` with a fixed capacity, where new execution results are pushed to the back and old results are popped from the front when the capacity is exceeded (proposing the capacity to be unconfigurable, and to be less than `100`).
+The reaction MUST maintain a ring buffer of recent execution results in memory, exposed through the `properties` field in the `ReactionRuntime` struct (via the `get_reaction_info` / `properties()` method on the `Reaction` trait).
 
-This inspection integration proposal could be enabled by a configuration flag (`enable_inspection`, default = `false`), and the stored execution results can include:
+This ring buffer is implemented as a `VecDeque` with a configurable capacity (`max_recent_invocations`, default 10). New execution results are pushed to the back and old results are popped from the front when the capacity is exceeded.
+
+This is always enabled (not gated behind a configuration flag). On edge devices without centralized log aggregation, this is often the only way to debug script failures. The memory cost is negligible.
+
+Each stored execution result includes:
 - timestamp start of execution
 - timestamp end of execution
 - exit code
-- stdout (they are already truncated by the `capture_limit` configuration)
-- stderr (they are already truncated by the `capture_limit` configuration)
+- stdout (already truncated by the `capture_limit` configuration)
+- stderr (already truncated by the `capture_limit` configuration)
 
 Note: the `properties` field in the `ReactionRuntime` is a mirror for the `properties` method in the `Reaction` trait.
-
-
 
 Current schema of the `ReactionRuntime` struct,
 ```rust
@@ -381,40 +391,16 @@ Controls:
 3. `kill_on_drop` can be enabled so process is terminated when handle is dropped during shutdown/restart.
 
 #### Concurrency and backpressure
+
 Configuration:
-- `max_concurrent` configuration field limits the number of active child processes. If the limit is reached, new events are queued.
+- `max_concurrent` limits the number of active child processes.
 
-Instead of directly enqueueing the events to the reaction internal bounded priority queue, a new unbounded channel is proposed to be added in the reaction that will be receiving the events from the main subscription loop and then the reaction will have a separate task that will be reading from that channel and enqueueing the events to the internal bounded priority queue.
+The reaction delegates event ingestion to `ReactionBase::enqueue_query_result()`, which enqueues events into the existing bounded priority queue using `enqueue_wait()`. Backpressure is handled upstream by the dispatch layer, not by the reaction itself:
 
-This approach allows us to keep the standard event reception mechansim unchanged and preventing the deadlocking when the query is operating in `BroadCast` dispatch mode, while keeping the backpressue mechansim handled internally in the reaction, Also without affecting the priority handling of the events in the internal queue.
+- In **channel mode**, blocking propagates backpressure through the dedicated channel to the source.
+- In **broadcast mode**, the broadcast channel drops lagged messages before they reach the reaction.
 
-With implementation of the `enqueue_query_result` function in the `Reaction` trait.
-
-```rust 
-   async fn enqueue_query_result( // within the Reaction trait implementation for the Shell Reaction
-        &self,
-        result: drasi_lib::channels::QueryResult,
-    ) -> anyhow::Result<()> {
-        self.enqueue_to_internal_channel(result).await // this function will be responsible for sending the result to the internal unbounded channel
-    }
-```
-
-While another internal task will be responsible for reading from that channel and enqueueing to the internal bounded priority queue.
-
-```rust
-// this function will be responsible for reading from the internal unbounded channel and enqueueing to the internal bounded priority queue
-async fn process_incoming_events(&self) {
-    loop {
-        // read from the internal unbounded channel
-        // [Blocking] enqueue to the internal bounded priority queue with backpressure handling using the `enqueue_query_result` of the `ReactionBase`.
-    }
-}
-```
-
-Problems with this approach:
-- No hard limit on the unbounded channel.
-- very high `timeout_s` and very low `max_concurrent` can lead to high memory usage due to event accumulation in the unbounded channel.
-- Can add more complexity on intergration with the new durable reaction designs.
+No intermediate unbounded channel is needed. The `max_concurrent` limit is enforced when dequeuing from the priority queue and spawning child processes. When the limit is reached, the reaction stops dequeuing until a running process completes.
 
 #### Timeout and process termination
 
@@ -426,7 +412,9 @@ Termination is performed in two stages:
 1. Send `SIGTERM` to the whole process group to allow graceful shutdown.
 2. If the process doesn't exit within a grace period (for example, `timeout_s`/ 8), send `SIGKILL` to force termination.
 
-Initial semi-pseudo code for timeout implementation (stdout and stderr capture and limits are not included in this snippet):
+Writing to stdin and waiting for process exit are performed concurrently under the same timeout to prevent deadlocks where the process is waiting for stdin data while the reaction is waiting for process exit.
+
+Initial semi-pseudo code for timeout implementation (stdout and stderr capture and limits are not included in this snippet, in implementation, they will be treated as another more task that runs concurrently with the write and wait tasks, and also under the same timeout):
 
 ```rust
 use tokio::time::{timeout, Duration};
@@ -435,21 +423,26 @@ use tokio::io::AsyncWriteExt;
 let pgid = child.id().unwrap() as i32;
 let timeout_duration = Duration::from_secs(timeout_s);
 
-let result = timeout(timeout_duration, async {
-    //........write data to stdin
+let write_fut = async {
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(&payload).await?;
         stdin.shutdown().await?;
     }
+    Ok::<_, anyhow::Error>(())
+};
 
-    //........capture stdout and stderr data
-    
-    //........wait for process
+let wait_fut = async {
     let status = child.wait().await?;
-
     Ok::<_, anyhow::Error>(status)
-})
-.await;
+};
+
+// Both run concurrently under one timeout
+let result = timeout(timeout_duration, async {
+    let (write_result, wait_result) = tokio::join!(write_fut, wait_fut);
+    write_result?;
+    wait_result
+}).await;
+
 
 match result {
     Ok(Ok(status)) => {
@@ -556,15 +549,34 @@ ShellReactionConfig example:
 
 ```yaml
 max_concurrent: 5
-enable_inspection: true
 capture_limit: 1024
-payload_size_limit: 4096
+max_stdin_bytes: 1048576
 timeout_s: 10
 kill_on_drop: true
-send_raw: true
-global_envs:
-  GLOBAL_VAR1: "{{query_name}}"
-  GLOBAL_VAR2: "static_value"
+env:
+  LOG_LEVEL: "DEBUG"
+  DEPLOYMENT: "edge-gateway-01"
+routes:
+  overheated-machines:
+    command:
+      executable: "/usr/bin/python3"
+      args: ["/opt/scripts/overheat_handler.py"]
+    config:
+      added:
+        template: '{"alert": "new", "machine": "{{after.id}}"}'
+        env:
+          ALERT_TYPE: "NEW_OVERHEAT"
+      updated:
+        template: '{"alert": "update", "temp": {{after.current_temp}}}'
+        env:
+          ALERT_TYPE: "TEMP_CHANGE"
+default_template:
+  added:
+    template: '{"event": "added", "data": {{json after}}}'
+  updated:
+    template: '{"event": "updated", "data": {{json after}}}'
+  deleted:
+    template: '{"event": "deleted", "data": {{json before}}}'
 ```
 
 ### Alternatives Considered
@@ -595,13 +607,26 @@ Out of scope hardening features that can be added in future iterations:
 Metrics will include:
 - timeout firings
 - non-zero exits
-- output truncations
-- error truncatations
-- data size limit rejections
-- queue length
-- active processes
+- stdout truncations
+- stderr truncations
+- stdin payload size rejections
+- broadcast mode event drops (broadcast_drop_count)
+- active processes (current concurrency gauge)
 - results processed (can be grouped by operation type)
-- newlines added
+
+And they are exposed through the `properties` method in the `Reaction` trait implementation for the Shell Reaction, and also each event is logged using the `log` crate with appropriate log levels.
+
+Levels for logs:
+- timeout firings: warn
+- non-zero exits: warn
+- stdout truncations: warn
+- stderr truncations: warn
+- stdin payload size rejections: warn
+- broadcast mode event drops (broadcast_drop_count): warn
+- active processes (current concurrency gauge): debug
+- results processed (can be grouped by operation type): debug
+
+All non-normal events (timeouts, non-zero exits, truncations, rejections, drops) are logged at the `warn` level to ensure visibility in production environments. Normal operational metrics (active processes, results processed) are logged at the `debug` level to avoid noise.
 
 ### Verification
 
