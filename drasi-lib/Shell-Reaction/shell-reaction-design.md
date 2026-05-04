@@ -63,6 +63,7 @@ This design targets drasi-core reactions and aligns with the Drasi reaction mode
 - Secret injection via IdentityProvider (pass secrets through global env or fetch at runtime in the script)
 - PATH-based executable resolution (require absolute paths in V1)
 - Shell interpreter mode (operators who need piping can set executable to /bin/sh with static args ["-c", "<pipeline>"], which is safe because args are not templated)
+- Broadcast drop detection (drops happen in the dispatch layer before reaching the reaction. Once drasi-lib stamps result diffs with sequence numbers, the reaction could detect gaps and expose a counter)
 
 ## Design
 
@@ -610,7 +611,6 @@ Metrics will include:
 - stdout truncations
 - stderr truncations
 - stdin payload size rejections
-- broadcast mode event drops (broadcast_drop_count)
 - active processes (current concurrency gauge)
 - results processed (can be grouped by operation type)
 
@@ -622,7 +622,6 @@ Levels for logs:
 - stdout truncations: warn
 - stderr truncations: warn
 - stdin payload size rejections: warn
-- broadcast mode event drops (broadcast_drop_count): warn
 - active processes (current concurrency gauge): debug
 - results processed (can be grouped by operation type): debug
 
