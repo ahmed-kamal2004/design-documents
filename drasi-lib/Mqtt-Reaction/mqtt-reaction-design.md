@@ -439,6 +439,9 @@ Rationale on borderline cases:
 
 On terminal causes, the EventLoop task logs ERROR with the rendered reason code, transitions the reaction status to `Error`, and exits cleanly. The `processing_task` is then woken via the shutdown channel so `stop_common()` semantics apply.
 
+for v3.1.1, `RefusedProtocolVersion`, `BadClientId`, `BadUserNamePassword`, and `NotAuthorized` are terminal causes. For v5, the list is longer and includes all auth failures plus protocol errors.
+in v3.1.1, transient include `ServerUnavailable` (broker is alive but overloaded).\
+
 #### Backpressure
 
 The reaction relies on Drasi's existing channel-mode backpressure: query priority queue plus subscriber channel buffers. The processing loop awaits `publish().await` naturally, so a full rumqttc outbound buffer or unreachable broker propagates back through the priority queue. The blocking point is rumqttc's internal channel between `AsyncClient` and `EventLoop`, sized by `event_channel_capacity` (default 100).
