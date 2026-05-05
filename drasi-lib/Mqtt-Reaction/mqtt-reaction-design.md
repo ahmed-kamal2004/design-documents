@@ -439,8 +439,7 @@ Rationale on borderline cases:
 
 On terminal causes, the EventLoop task logs ERROR with the rendered reason code, transitions the reaction status to `Error`, and exits cleanly. The `processing_task` is then woken via the shutdown channel so `stop_common()` semantics apply.
 
-for v3.1.1, `RefusedProtocolVersion`, `BadClientId`, `BadUserNamePassword`, and `NotAuthorized` are terminal causes. For v5, the list is longer and includes all auth failures plus protocol errors.
-in v3.1.1, transient include `ServerUnavailable` (broker is alive but overloaded).\
+**v3.1.1 reason codes.** The table above covers v5; v3.1.1's CONNACK carries a smaller, fixed reason-code set. Terminal causes: `RefusedProtocolVersion`, `BadClientId`, `BadUserNamePassword`, `NotAuthorized`. Transient (rely on reconnect): `ServerUnavailable` (broker is alive but overloaded). v3.1.1 has no `DisconnectReasonCode` equivalent; broker-initiated disconnects surface as `ConnectionError::Io` and are handled as transient network failures.
 
 #### Backpressure
 
@@ -600,4 +599,3 @@ To be populated by the implementer with any unresolved questions raised during p
 - The upcoming Shell Reaction design document.
 - rumqttc: https://github.com/bytebeamio/rumqtt
 - MQTT v5 specification: https://docs.oasis-open.org/mqtt/mqtt/v5.0/mqtt-v5.0.html
-```
