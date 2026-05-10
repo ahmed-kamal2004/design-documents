@@ -64,6 +64,7 @@ This design targets drasi-core reactions and aligns with the Drasi reaction mode
 - PATH-based executable resolution (require absolute paths in V1)
 - Shell interpreter mode (operators who need piping can set executable to /bin/sh with static args ["-c", "<pipeline>"], which is safe because args are not templated)
 - Broadcast drop detection (drops happen in the dispatch layer before reaching the reaction. Once drasi-lib stamps result diffs with sequence numbers, the reaction could detect gaps and expose a counter)
+- Stdin opt-out (`enable_stdin: false`) for scripts that only need env vars and do not read stdin. V1 always sends stdin when a TemplateSpec exists (rendered template or raw JSON fallback), matching the HTTP reaction. Scripts that do not need stdin can simply not read it. If profiling shows the pipe write is a bottleneck on high-throughput edge deployments, a future version can add an opt-out flag
 
 ## Design
 
@@ -192,10 +193,8 @@ we will define a `ShellExtension` that will be holding the optional Env vars:
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ShellExtension {
     pub envs: Option<HashMap<String, String>>,
-    pub enable_stdin: Option<bool>, // optional flag to enable/disable stdin mode, default to true
 }
 ```
-`enable_stdin` is an optional flag to enable/disable stdin mode, which is default to `true` if not provided, used when the user only wants to use env variable mapping without using the stdin mode, or doesn't need to use the stdin mode nor the env variable mapping, and just want to use the reaction for executing a command without passing any data to it, in this case they can disable the stdin mode to avoid sending data to the child process.
 
 which will be used in the `TemplateSpec` as an extension.
 
@@ -224,7 +223,6 @@ let spec_add = TemplateSpec<ShellExtension> {
             ("FLOOR".to_string(), "{{after.floor}}".to_string()),
             ("TEMP".to_string(), "{{after.temp}}".to_string()),
         ]),
-        enable_stdin: Some(true),
         )
     },
 };
@@ -237,19 +235,17 @@ let spec_update = TemplateSpec<ShellExtension> {
             ("TEMP".to_string(), "{{after.temp}}".to_string()),
             ("BEFORE_TEMP".to_string(), "{{before.temp}}".to_string()),
         ]),
-        enable_stdin: Some(true),
         )
     },
 };
 
 let spec_delete = TemplateSpec<ShellExtension> {
-    template: "DUMMY".to_string(),
+    template: "".to_string(), // empty template = raw JSON fallback
     extension: ShellExtension {
         envs: Some(HashMap::from([
             ("FLOOR".to_string(), "{{before.floor}}".to_string()),
             ("TEMP".to_string(), "{{before.temp}}".to_string()),
         ])),
-        enable_stdin: Some(false), // disable stdin for delete events
     },
 };
 
