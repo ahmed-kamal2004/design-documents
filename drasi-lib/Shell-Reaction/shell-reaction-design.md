@@ -192,7 +192,7 @@ we will define a `ShellExtension` that will be holding the optional Env vars:
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ShellExtension {
-    pub envs: Option<HashMap<String, String>>,
+    pub env: Option<HashMap<String, String>>,
 }
 ```
 
@@ -219,7 +219,7 @@ Example config for both modes together:
 let spec_add = TemplateSpec<ShellExtension> {
     template: "[{{query_name}}] + {{after.floor}}: {{after.temp}}".to_string(),
     extension: ShellExtension {
-        envs: Some(HashMap::from([
+        env: Some(HashMap::from([
             ("FLOOR".to_string(), "{{after.floor}}".to_string()),
             ("TEMP".to_string(), "{{after.temp}}".to_string()),
         ]),
@@ -230,7 +230,7 @@ let spec_add = TemplateSpec<ShellExtension> {
 let spec_update = TemplateSpec<ShellExtension> {
     template: "[{{query_name}}] ~ {{after.floor}}: {{before.temp}} {{after.temp}}".to_string(),
     extension: ShellExtension {
-        envs: Some(HashMap::from([
+        env: Some(HashMap::from([
             ("FLOOR".to_string(), "{{after.floor}}".to_string()),
             ("TEMP".to_string(), "{{after.temp}}".to_string()),
             ("BEFORE_TEMP".to_string(), "{{before.temp}}".to_string()),
@@ -240,9 +240,9 @@ let spec_update = TemplateSpec<ShellExtension> {
 };
 
 let spec_delete = TemplateSpec<ShellExtension> {
-    template: "".to_string(), // empty template = raw JSON fallback
+    template: "".to_string(), // empty string template - will send empty string to stdin
     extension: ShellExtension {
-        envs: Some(HashMap::from([
+        env: Some(HashMap::from([
             ("FLOOR".to_string(), "{{before.floor}}".to_string()),
             ("TEMP".to_string(), "{{before.temp}}".to_string()),
         ])),
@@ -416,6 +416,17 @@ Initial semi-pseudo code for timeout implementation (stdout and stderr capture a
 ```rust
 use tokio::time::{timeout, Duration};
 use tokio::io::AsyncWriteExt;
+use std::os::unix::process::CommandExt;
+
+// Spawn child in its own process group so kill(-pgid, ...) targets
+// the child subtree, not Drasi's own process group.
+let mut child = Command::new(&executable)
+    .args(&args)
+    .envs(&env_mapping)
+    .stdin(Stdio::piped())
+    .process_group(0)  // new process group with child PID as PGID
+    .kill_on_drop(true)
+    .spawn()?;
 
 let pgid = child.id().unwrap() as i32;
 let timeout_duration = Duration::from_secs(timeout_s);
@@ -479,7 +490,8 @@ match result {
 
 `retry_on_failure` example config:
 ```yaml
-execute: "/bin/python3 /scripts/handle_event.py"
+executable: "/bin/python3"
+args: ["/scripts/handle_event.py"]
 retry_on_failure:
   enabled: true
   max_retries: 3
@@ -504,7 +516,8 @@ common used capabilities can be grouped into profiles together. For example, `lo
 Config shape (proposal):
 
 ```yaml
-execute: "/bin/python3 /scripts/handle_event.py"
+executable: "/bin/python3"
+args: ["/scripts/handle_event.py"]
 hardening:
   seccomp:
     enabled: true
@@ -512,8 +525,8 @@ hardening:
       - read_files
       - write_files
   process:
-    envClear: true
-    minimalPath: "/usr/local/bin:/usr/bin"
+    env_clear: true
+    minimal_path: "/usr/local/bin:/usr/bin"
 ```
 
 Implementation notes:
@@ -525,12 +538,12 @@ To minimize inherited environment variable risks, we propose an `env_clear` opti
 
 example config:
 ```yaml
-execute: "/bin/python3 /scripts/handle_event.py"
+executable: "/bin/python3"
+args: ["/scripts/handle_event.py"]
 hardening:
   process:
     env_clear: true
     envs: [PATH, CUSTOM_VAR]
-        
 ```
 
 
@@ -576,25 +589,17 @@ default_template:
     template: '{"event": "deleted", "data": {{json before}}}'
 ```
 
-### Alternatives Considered
-
-<!-- Describe the alternative designs that were considered or should be considered. Give a justification for why alternative approaches should be rejected if possible. -->
-
 ## Security
 
 Security model in this design prioritizes constrained execution:
 
 1. Single executable path with startup validation reduces command injection surface.
 2. stdin/env mappings are explicit and template-driven.
-4. `kill_on_drop` helps optional avoidance of orphaned processes on crash/redeploy paths.
+3. `kill_on_drop` helps optional avoidance of orphaned processes on crash/redeploy paths.
 
 Out of scope hardening features that can be added in future iterations:
 1. seccomp profile and Linux capability reduction
 2. `env_clear` to start with a minimal environment.
-
-## Compatibility impact
-
-<!-- Optional. Describe the potential compatibility issues with the other components---such as incompatible with older CLI. Include breaking changes to behaviors or APIs here. -->
 
 ## Supportability
 
@@ -622,21 +627,6 @@ Levels for logs:
 - results processed (can be grouped by operation type): debug
 
 All non-normal events (timeouts, non-zero exits, truncations, rejections, drops) are logged at the `warn` level to ensure visibility in production environments. Normal operational metrics (active processes, results processed) are logged at the `debug` level to avoid noise.
-
-### Verification
-
-<!-- This includes the test plan to validate the features such as unit-test and functional tests. -->
-
-## Development Plan
-
-<!-- This section is for planning how you will deliver your features. This includes aligning work items to features, scenarios or requirements, defining what deliverable will be checked in at each point in the product and estimating the cost of each work item. Don't forget to include the Unit Test and functional test in your estimates. -->
-
-## Open issues
-<!-- Describe (Q&A format) the important unknowns or things you're not sure about. Use the discussion of to answer these with experts after people digest the overall design. -->
-
-## Appendices
-
-<!-- Optional. Describe additional information supporting this design. For instance, describe the details of alternative design if you have one. -->
 
 ## References
 
